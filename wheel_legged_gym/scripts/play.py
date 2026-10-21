@@ -46,10 +46,7 @@ def play(args):
     env_cfg.env.episode_length_s = 20
     env_cfg.env.fail_to_terminal_time_s = 3
     env_cfg.env.num_envs = min(env_cfg.env.num_envs, 50)
-    env_cfg.terrain.num_rows = 5
-    env_cfg.terrain.num_cols = 10
-    env_cfg.terrain.max_init_terrain_level = env_cfg.terrain.num_rows - 1
-    env_cfg.terrain.curriculum = True
+    env_cfg.sim.physx.max_gpu_contact_pairs = 2**20  # default 2**23, smaller = less GPU mem
     env_cfg.noise.add_noise = False
     env_cfg.domain_rand.randomize_friction = False
     env_cfg.domain_rand.friction_range = [0.1, 0.2]
@@ -63,6 +60,24 @@ def play(args):
     env_cfg.domain_rand.randomize_motor_torque = False
     env_cfg.domain_rand.randomize_default_dof_pos = False
     env_cfg.domain_rand.randomize_action_delay = False
+
+    is_q1 = args.task.startswith("q1")
+    if is_q1:
+        # Q1 terrain: smaller, no curriculum (all terrain types from the start)
+        env_cfg.terrain.num_rows = 4
+        env_cfg.terrain.num_cols = 10
+        env_cfg.terrain.terrain_length = 4.0
+        env_cfg.terrain.terrain_width = 4.0
+        env_cfg.terrain.max_init_terrain_level = 0
+        env_cfg.terrain.curriculum = False
+    else:
+        # wheel-legged terrain
+        env_cfg.terrain.num_rows = 5
+        env_cfg.terrain.num_cols = 10
+        env_cfg.terrain.terrain_length = 4.0
+        env_cfg.terrain.terrain_width = 4.0
+        env_cfg.terrain.max_init_terrain_level = env_cfg.terrain.num_rows - 1
+        env_cfg.terrain.curriculum = False  # 所有地形类型都出现
 
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
@@ -87,7 +102,7 @@ def play(args):
         print("Exported policy as jit script to: ", path)
 
     logger = Logger(env.dt)
-    robot_index = 21  # which robot is used for logging
+    robot_index = min(21, env.num_envs - 1)  # which robot is used for logging
     joint_index = 1  # which joint is used for logging
     stop_state_log = 1000  # number of steps before plotting states
     stop_rew_log = (

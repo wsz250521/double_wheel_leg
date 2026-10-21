@@ -28,6 +28,8 @@
 #
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from collections import defaultdict
@@ -64,6 +66,10 @@ class Logger:
         self.plot_process.start()
 
     def _plot(self):
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
         nb_rows = 3
         nb_cols = 3
         fig, axs = plt.subplots(nb_rows, nb_cols)
@@ -166,7 +172,9 @@ class Logger:
             a.plot(time, log["dof_torque"], label="real")
         a.set(xlabel="time [s]", ylabel="Joint Torque [Nm]", title="Torque")
         a.legend()
-        plt.show()
+        fig.tight_layout()
+        fig.savefig("/tmp/wheel_legged_states.png", dpi=150)
+        plt.close(fig)
 
     def print_rewards(self):
         print("Average rewards per second:")

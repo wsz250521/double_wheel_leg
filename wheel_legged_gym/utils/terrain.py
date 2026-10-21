@@ -126,7 +126,11 @@ class Terrain:
         )
         slope = difficulty * 0.5
         random_height = 0.05 + difficulty * 0.05
-        step_height = 0.05 + 0.18 * difficulty
+        # Allow capping the maximum step height via config (e.g. 0.10m for 10cm stairs).
+        # Falls back to the legacy 0.05 + 0.18 * difficulty when not specified.
+        step_height_min = 0.05
+        step_height_max = getattr(self.cfg, "step_height_max", 0.23)
+        step_height = step_height_min + (step_height_max - step_height_min) * difficulty
         discrete_obstacles_height = 0.05 + difficulty * 0.1
         stepping_stones_size = 1.5 * (1.05 - difficulty)
         stone_distance = 0.05 if difficulty == 0 else 0.1

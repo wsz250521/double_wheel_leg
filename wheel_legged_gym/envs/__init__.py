@@ -9,11 +9,9 @@
 #
 # 2. Redistributions in binary form must reproduce the above copyright notice,
 # this list of conditions and the following disclaimer in the documentation
-# and/or other materials provided with the distribution.
-#
-# 3. Neither the name of the copyright holder nor the names of its
-# contributors may be used to endorse or promote products derived from
-# this software without specific prior written permission.
+# and/or any modifications thereto.  Any use, reproduction, disclosure or
+# distribution of this software and related documentation without an express
+# license agreement from NVIDIA CORPORATION is strictly prohibited.
 #
 # THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 # AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
@@ -40,7 +38,13 @@ from .wheel_legged_vmc_flat.wheel_legged_vmc_flat_config import (
     WheelLeggedVMCFlatCfg,
     WheelLeggedVMCFlatCfgPPO,
 )
-
+from .wheel_legged_vmc_stairs.wheel_legged_vmc_stairs_config import (
+    WheelLeggedVMCStairsCfg,
+    WheelLeggedVMCStairsCfgPPO,
+)
+from .q1_vmc.q1_vmc import LeggedRobotQ1VMC
+from .q1_vmc.q1_vmc_config import Q1VMCCfg, Q1VMCCfgPPO
+from .q1_vmc.q1_vmc_stairs_config import Q1VMCStairsCfg, Q1VMCStairsCfgPPO
 
 import os
 
@@ -57,4 +61,22 @@ task_registry.register(
     LeggedRobotVMC,
     WheelLeggedVMCFlatCfg(),
     WheelLeggedVMCFlatCfgPPO(),
+)
+task_registry.register(
+    "wheel_legged_vmc_stairs",
+    LeggedRobotVMC,
+    WheelLeggedVMCStairsCfg(),
+    WheelLeggedVMCStairsCfgPPO(),
+)
+task_registry.register(
+    "q1_vmc",
+    LeggedRobotQ1VMC,
+    Q1VMCCfg(),
+    Q1VMCCfgPPO(),
+)
+task_registry.register(
+    "q1_vmc_stairs",
+    LeggedRobotQ1VMC,
+    Q1VMCStairsCfg(),
+    Q1VMCStairsCfgPPO(),
 )

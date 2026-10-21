@@ -81,6 +81,9 @@ class LeggedRobotCfg(BaseConfig):
         num_cols = 20  # number of terrain cols (types)
         # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
         terrain_proportions = [0.2, 0.2, 0.2, 0.1, 0.2, 0.1]
+        # Maximum stair step height [m] at difficulty=1. Set lower to cap the
+        # tallest stair the curriculum will ever produce (e.g. 0.10 for 10cm stairs).
+        step_height_max = 0.23
         # trimesh only:
         slope_treshold = (
             0.75  # slopes above this threshold will be corrected to vertical surfaces
