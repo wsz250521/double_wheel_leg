@@ -44,7 +44,7 @@ from .wheel_legged_vmc_stairs.wheel_legged_vmc_stairs_config import (
 )
 from .q1_vmc.q1_vmc import LeggedRobotQ1VMC
 from .q1_vmc.q1_vmc_config import Q1VMCCfg, Q1VMCCfgPPO
-from .q1_vmc.q1_vmc_stairs_config import Q1VMCStairsCfg, Q1VMCStairsCfgPPO
+from .q1_vmc_stairs.q1_vmc_stairs_config import Q1VMCStairsCfg, Q1VMCStairsCfgPPO
 
 import os
 
