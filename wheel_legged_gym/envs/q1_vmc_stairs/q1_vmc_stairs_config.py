@@ -62,7 +62,7 @@ class Q1VMCStairsCfg(Q1VMCCfg):
 
         # Terrain types: [smooth, rough, stairs_up, stairs_down, discrete, stepping_stones]
         # Stairs dominate so the policy spends most capacity on the task that matters.
-        terrain_proportions = [0.0, 0.0, 0.5, 0.3, 0.1, 0.1]
+        terrain_proportions = [0.5, 0.0, 0.25, 0.25, 0.0, 0.0]
 
         # ---- 10 cm stair target ----
         # step_height = 0.05 + (step_height_max - 0.05) * difficulty
@@ -77,8 +77,8 @@ class Q1VMCStairsCfg(Q1VMCCfg):
     class commands(Q1VMCCfg.commands):
         curriculum = False  # terrain curriculum remains True; do not change command range
         class ranges(Q1VMCCfg.commands.ranges):
-            lin_vel_x = [0.3, 1.0]
-            ang_vel_yaw = [-0.4, 0.4]
+            lin_vel_x = [0.0, 0.6]
+            ang_vel_yaw = [-0.3, 0.3]
             height = [0.42, 0.42]  # Q1 body/trunk target height above local terrain
 
     class control(Q1VMCCfg.control):
