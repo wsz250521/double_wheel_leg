@@ -62,7 +62,33 @@ def play(args):
     env_cfg.domain_rand.randomize_action_delay = False
 
     is_q1 = args.task.startswith("q1")
-    if is_q1:
+    is_stairs = "stairs" in args.task
+    if is_stairs:
+        # ---- 楼梯任务：只保留平地与楼梯地形，并且只生成一台机器人 ----
+        env_cfg.env.num_envs = 1
+        env_cfg.terrain.curriculum = True
+        env_cfg.terrain.num_rows = 6               # 行 = 难度等级 (行沿 x 轴排列)
+        env_cfg.terrain.num_cols = 20              # 列 = 地形类型 (列沿 y 轴排列)
+        env_cfg.terrain.terrain_length = 8.0
+        env_cfg.terrain.terrain_width = 8.0
+        env_cfg.terrain.max_init_terrain_level = env_cfg.terrain.num_rows - 1
+        # terrain_proportions 的顺序为:
+        # [平地, 光滑斜坡, 粗糙斜坡, 上楼梯, 下楼梯, 离散障碍, 踏石, 沟槽, 深坑]
+        # 这里只留下平地和楼梯。
+        env_cfg.terrain.terrain_proportions = [
+            0.5,   # 平地
+            0.0,   # 光滑斜坡
+            0.0,   # 粗糙斜坡
+            0.25,  # 上楼梯
+            0.25,  # 下楼梯
+            0.0,   # 离散障碍
+            0.0,   # 踏石
+            0.0,   # 沟槽
+            0.0,   # 深坑
+        ]
+        # 相机从后侧方跟随机器人
+        env_cfg.viewer.pos = [-3.0, -2.5, 1.5]
+    elif is_q1:
         # Q1 terrain: smaller, no curriculum (all terrain types from the start)
         env_cfg.terrain.num_rows = 4
         env_cfg.terrain.num_cols = 10
@@ -81,6 +107,24 @@ def play(args):
 
     # prepare environment
     env, _ = task_registry.make_env(name=args.task, args=args, env_cfg=env_cfg)
+
+    if is_stairs:
+        # 地形是“行=难度、列=类型”的网格，把这台机器人放到上楼梯的地块上。
+        # 20 列、terrain_proportions=[0.5,0,0,0.25,0.25,...] 时:
+        #   第 0~9 列是平地，第 10~14 列是上楼梯，第 15~19 列是下楼梯。
+        stairs_col = 12                       # 上楼梯
+        stairs_row = 3                        # 难度 3/6 -> 台阶高度 0.05 + 0.05*0.5 = 7.5 cm
+        env.terrain_types[:] = stairs_col
+        env.terrain_levels[:] = stairs_row
+        env.env_origins[:] = env.terrain_origins[stairs_row, stairs_col]
+        env_ids = torch.tensor([0], device=env.device, dtype=torch.long)
+        env._reset_dofs(env_ids)
+        env._reset_root_states(env_ids)
+        print(
+            f"[play] single robot on stairs tile: row={stairs_row} col={stairs_col}, "
+            f"origin={env.env_origins[0].cpu().numpy()}"
+        )
+
     obs, obs_history = env.get_observations()
     # load policy
     train_cfg.runner.resume = True
@@ -241,6 +285,6 @@ def play(args):
 if __name__ == "__main__":
     EXPORT_POLICY = True
     RECORD_FRAMES = False
-    MOVE_CAMERA = False
+    MOVE_CAMERA = True  # 相机跟随机器人
     args = get_args()
     play(args)

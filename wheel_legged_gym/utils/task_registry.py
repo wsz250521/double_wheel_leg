@@ -33,8 +33,9 @@ from datetime import datetime
 from typing import Tuple
 import torch
 import numpy as np
-from shutil import copyfile
+import glob
 import ntpath
+from shutil import copyfile
 
 from wheel_legged_gym.rsl_rl.env.vec_env import VecEnv
 from wheel_legged_gym.rsl_rl.runners.on_policy_runner import OnPolicyRunner
@@ -81,6 +82,31 @@ class TaskRegistry:
         env_cfg.seed = train_cfg.seed
         return env_cfg, train_cfg
 
+    def _find_env_file(self, name: str, file_name: str):
+        """Locate an env source file for a task.
+
+        The task name does not always match the directory that holds the env
+        files (e.g. task "q1_vmc_stairs" lives in the "q1_vmc" folder), so we
+        first look in envs/<name>/ and then fall back to a recursive search
+        over all env folders.
+
+        Args:
+            name (string): Registered task name.
+            file_name (string): File name to look for, e.g. "q1_vmc_stairs_config.py".
+
+        Returns:
+            str: Absolute path to the file, or None if it does not exist.
+        """
+        candidates = [
+            os.path.join(WHEEL_LEGGED_GYM_ENVS_DIR, name, file_name),
+            os.path.join(WHEEL_LEGGED_GYM_ENVS_DIR, "*", file_name),
+        ]
+        for pattern in candidates:
+            matches = sorted(glob.glob(pattern))
+            if matches:
+                return matches[0]
+        return None
+
     def save_cfgs(self, name) -> Tuple[LeggedRobotCfg, LeggedRobotCfgPPO]:
         os.mkdir(self.log_dir)
 
@@ -93,18 +119,19 @@ class TaskRegistry:
                 self.log_dir,
                 WHEEL_LEGGED_GYM_ENVS_DIR + "/base/legged_robot_config.py",
             ),
-            os.path.join(
-                self.log_dir,
-                WHEEL_LEGGED_GYM_ENVS_DIR
-                + "/{}/".format(name)
-                + "{}_config.py".format(name),
-            ),
         ]
-        py_root = os.path.join(
-            WHEEL_LEGGED_GYM_ENVS_DIR + "/{}/".format(name) + "{}.py".format(name),
-        )
-        if os.path.exists(py_root):
-            save_items.append(os.path.join(self.log_dir, py_root))
+        cfg_file = self._find_env_file(name, "{}_config.py".format(name))
+        if cfg_file is None:
+            raise FileNotFoundError(
+                "Could not find the config file '{}_config.py' for task '{}'".format(
+                    name, name
+                )
+            )
+        save_items.append(cfg_file)
+
+        py_root = self._find_env_file(name, "{}.py".format(name))
+        if py_root is not None:
+            save_items.append(py_root)
         if save_items is not None:
             for save_item in save_items:
                 base_file_name = ntpath.basename(save_item)

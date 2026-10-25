@@ -1,112 +1,177 @@
-# SPDX-FileCopyrightText: Copyright (c) 2021 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: BSD-3-Clause
-#
-# Redistribution and use in source and binary forms, with or without
-# modification, are permitted provided that the following conditions are met:
-#
-# 1. Redistributions of source code must retain the above copyright notice, this
-# list of conditions and the following disclaimer.
-#
-# 2. Redistributions in binary form must reproduce the above copyright notice,
-# this list of conditions and the following disclaimer in the documentation
-# and/or any modifications thereto.  Any use, reproduction, disclosure or
-# distribution of this software and related documentation without an express
-# license agreement from NVIDIA CORPORATION is strictly prohibited.
-#
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
-# Copyright (c) 2021 ETH Zurich, Nikita Rudin
+# SPDX-FileCopyrightText: Copyright (c) 2021 ETH Zurich, Nikita Rudin
+# Q1-specific VMC adaptation.  The upstream wheel-legged VMC remains unchanged.
 
+"""VMC for Q1's two serial hip/knee legs and two wheels.
+
+URDF (trunk frame): both hip and knee axes are +Y, on both sides.
+Positive knee/hip angle rotates the leg toward negative trunk X.
+The Q1 leg endpoints are wheel-axle centers (not ground-contact points).
+
+Body-frame leg endpoint (x forward, z_down toward ground):
+    x = hip_x - l1*sin(q_hip) - l2*sin(q_hip+q_knee)
+    z = -hip_z + l1*cos(q_hip) + l2*cos(q_hip+q_knee)
+    L = sqrt(x*x + z*z),  theta = atan2(x,z)
+
+Joint torques use the analytical Jacobian transpose of (L, theta).
+The Q1 controller, not the original WL controller, defines all joint signs.
 """
-Q1 robot VMC environment.
 
-Key differences from wheel-legged VMC:
-- 6 DOFs without abduction joints: [L_thigh, L_calf, L_foot, R_thigh, R_calf, R_foot]
-- Joint indices for VMC state extraction:
-    theta1: L_thigh (idx 0), R_thigh (idx 3)
-    theta2: L_calf  (idx 1), R_calf  (idx 4)
-  (wheel-legged uses idx 1/4 for theta1/theta2 because it has abduction at idx 0/3)
-- Wheel joints are indices 2 and 5 (same as wheel-legged).
-
-The VMC math (forward_kinematics, VMC block) is unchanged since both robots
-are planar 2-link mechanisms in the sagittal plane.
-"""
+import torch
 
 from wheel_legged_gym.envs.wheel_legged_vmc.wheel_legged_vmc import LeggedRobotVMC
 from .q1_vmc_config import Q1VMCCfg
-import torch
 
 
 class LeggedRobotQ1VMC(LeggedRobotVMC):
-    """
-    Q1 robot with VMC-based controller.
-    Inherits all training infrastructure (terrain, rewards, domain rand, PPO runner)
-    from LeggedRobotVMC; only overrides the VMC-specific joint mappings.
-    """
+    _EXPECTED_DOF_NAMES = (
+        "L_thigh_joint", "L_calf_joint", "L_foot_joint",
+        "R_thigh_joint", "R_calf_joint", "R_foot_joint",
+    )
 
-    def __init__(
-        self, cfg: Q1VMCCfg, sim_params, physics_engine, sim_device, headless
-    ):
-        self.cfg = cfg
-        # Delegating to LeggedRobot (grand-parent) which calls create_sim(),
-        # _init_buffers(), etc., then LeggedRobotVMC adds VMC buffers.
-        from wheel_legged_gym.envs.base.legged_robot import LeggedRobot
-        LeggedRobot.__init__(self, self.cfg, sim_params, physics_engine, sim_device, headless)
-        # Prime VMC state from the initial DOF positions after environment creation.
+    def __init__(self, cfg: Q1VMCCfg, sim_params, physics_engine, sim_device, headless):
+        # Normal inherited init runs LeggedRobotVMC._init_buffers through
+        # virtual method dispatch, which initializes all VMC gain tensors.
+        super().__init__(cfg, sim_params, physics_engine, sim_device, headless)
+        actual = tuple(self.dof_names)
+        if actual != self._EXPECTED_DOF_NAMES:
+            raise ValueError(
+                "Q1 VMC joint order differs from the URDF assumption. "
+                f"Expected {self._EXPECTED_DOF_NAMES}, actual {actual}. "
+                "Adjust joint indexing before applying torques."
+            )
         self.leg_post_physics_step()
 
+    def _q1_kinematics(self, hip, knee):
+        """Returns L, theta and analytical d(L,theta)/d(hip,knee).
+
+        Args: hip, knee: [num_envs,2] both legs, using actual URDF DOF signs.
+        Returns: L,theta [N,2]; J_L,J_theta [N,2,2] with last axis hip,knee.
+        """
+        q12 = hip + knee
+        l1 = self.cfg.asset.l1
+        l2 = self.cfg.asset.l2
+        x = (self.cfg.asset.hip_x
+             - l1 * torch.sin(hip) - l2 * torch.sin(q12))
+        z = (-self.cfg.asset.hip_z
+             + l1 * torch.cos(hip) + l2 * torch.cos(q12))
+        length_sq = torch.clamp(x.square() + z.square(), min=1e-8)
+        length = torch.sqrt(length_sq)
+        theta = torch.atan2(x, z)  # zero is vertical; positive means axle in +X
+
+        dx_dhip = -l1 * torch.cos(hip) - l2 * torch.cos(q12)
+        dx_dknee = -l2 * torch.cos(q12)
+        dz_dhip = -l1 * torch.sin(hip) - l2 * torch.sin(q12)
+        dz_dknee = -l2 * torch.sin(q12)
+
+        dlength_dhip = (x * dx_dhip + z * dz_dhip) / length
+        dlength_dknee = (x * dx_dknee + z * dz_dknee) / length
+        dtheta_dhip = (z * dx_dhip - x * dz_dhip) / length_sq
+        dtheta_dknee = (z * dx_dknee - x * dz_dknee) / length_sq
+
+        jac_length = torch.stack((dlength_dhip, dlength_dknee), dim=-1)
+        jac_theta = torch.stack((dtheta_dhip, dtheta_dknee), dim=-1)
+        return length, theta, jac_length, jac_theta
+
+    def forward_kinematics(self, theta1, theta2):
+        """Q1-only replacement for WL forward kinematics.
+
+        Inputs are Q1 *actual* hip and knee joint angles, not WL transformed
+        angles (no right-leg negation and no knee +pi/2 offset).
+        """
+        length, theta, _, _ = self._q1_kinematics(theta1, theta2)
+        return length, theta
+
     def leg_post_physics_step(self):
+        # Actual Q1 URDF order: L_hip,L_knee,L_wheel,R_hip,R_knee,R_wheel.
+        # Both sides have +Y joint axes, so right angles MUST NOT be negated.
+        self.theta1 = self.dof_pos[:, [0, 3]]
+        self.theta2 = self.dof_pos[:, [1, 4]]
+        hip_vel = self.dof_vel[:, [0, 3]]
+        knee_vel = self.dof_vel[:, [1, 4]]
+
+        self.L0, self.theta0, self._q1_jac_length, self._q1_jac_theta = (
+            self._q1_kinematics(self.theta1, self.theta2)
+        )
+        qdot = torch.stack((hip_vel, knee_vel), dim=-1)
+        self.L0_dot = torch.sum(self._q1_jac_length * qdot, dim=-1)
+        self.theta0_dot = torch.sum(self._q1_jac_theta * qdot, dim=-1)
+
+    def VMC(self, F, T):
+        """Map Q1 virtual axial-force and angle-torque into URDF joint torques.
+
+        F > 0 pushes toward longer virtual-leg length; the Jacobian transpose
+        handles joint signs consistently for BOTH Q1 legs.
         """
-        Extract VMC state (theta1, theta2, L0, theta0) from Q1 joint positions.
-        Q1 DOF order: [L_thigh=0, L_calf=1, L_foot=2, R_thigh=3, R_calf=4, R_foot=5]
-        This differs from wheel-legged: [lf0=0, lf1=1, l_wheel=2, rf0=3, rf1=4, r_wheel=5]
-        For Q1, thigh is at idx 0/3 (no abduction at idx 0/3); calf at idx 1/4 (same as wheel-legged).
-        """
-        # theta1: thigh angles.  Left is positive, right is negated (URDF axis sign).
-        self.theta1 = torch.cat(
-            (self.dof_pos[:, 0].unsqueeze(1), -self.dof_pos[:, 3].unsqueeze(1)), dim=1
+        joint_torque = (self._q1_jac_length * F.unsqueeze(-1)
+                        + self._q1_jac_theta * T.unsqueeze(-1))
+        return joint_torque[..., 0], joint_torque[..., 1]
+
+    def _compute_torques(self, actions):
+        """Q1 actions: [L_theta,L_length,L_wheel,R_theta,R_length,R_wheel]."""
+        # Limit commanded offsets while keeping learned policy/action API intact.
+        a = torch.clamp(actions, -1.0, 1.0)
+        theta_ref = a[:, [0, 3]] * self.cfg.control.action_scale_theta
+        length_ref = (
+            a[:, [1, 4]] * self.cfg.control.action_scale_l0
+            + self.cfg.control.l0_offset
         )
-        # theta2: calf angles (same indexing as wheel-legged; pi/2 offset converts
-        # to VMC convention where theta2=0 means leg is straight).
-        self.theta2 = torch.cat(
-            (
-                (self.dof_pos[:, 1] + self.pi / 2).unsqueeze(1),
-                (-self.dof_pos[:, 4] + self.pi / 2).unsqueeze(1),
-            ),
-            dim=1,
+        wheel_vel_ref = a[:, [2, 5]] * self.cfg.control.action_scale_vel
+
+        self.torque_leg = (
+            self.theta_kp * (theta_ref - self.theta0)
+            - self.theta_kd * self.theta0_dot
         )
-        theta1_dot = torch.cat(
-            (self.dof_vel[:, 0].unsqueeze(1), -self.dof_vel[:, 3].unsqueeze(1)), dim=1
+        self.force_leg = (
+            self.l0_kp * (length_ref - self.L0)
+            - self.l0_kd * self.L0_dot
         )
-        theta2_dot = torch.cat(
-            (self.dof_vel[:, 1].unsqueeze(1), -self.dof_vel[:, 4].unsqueeze(1)), dim=1
+        self.torque_wheel = (
+            self.d_gains[:, [2, 5]] * (wheel_vel_ref - self.dof_vel[:, [2, 5]])
+        )
+        hip_torque, knee_torque = self.VMC(
+            self.force_leg + self.cfg.control.feedforward_force, self.torque_leg
         )
 
-        self.L0, self.theta0 = self.forward_kinematics(self.theta1, self.theta2)
-
-        # Numerical differentiation for L0_dot and theta0_dot.
-        dt = 0.001
-        L0_temp, theta0_temp = self.forward_kinematics(
-            self.theta1 + theta1_dot * dt, self.theta2 + theta2_dot * dt
+        # Unlike WL, Q1 has the SAME +Y axis sign on both sides.
+        torques = torch.stack(
+            (hip_torque[:, 0], knee_torque[:, 0], self.torque_wheel[:, 0],
+             hip_torque[:, 1], knee_torque[:, 1], self.torque_wheel[:, 1]),
+            dim=-1,
         )
-        self.L0_dot = (L0_temp - self.L0) / dt
-        self.theta0_dot = (theta0_temp - self.theta0) / dt
+        return torch.clamp(
+            torques * self.torques_scale, -self.torque_limits, self.torque_limits
+        )
+
+    def _reward_base_height(self):
+        """Smooth NON-SATURATING local base-height penalty for Q1.
+
+        On stairs, use samples below/very near the trunk, not the average over
+        1.5m of *look-ahead* terrain.  Reward scale must be negative.
+        """
+        local_terrain = None
+        samples = self.measured_heights
+        if torch.is_tensor(samples) and samples.ndim == 2:
+            xs = self.cfg.terrain.measured_points_x
+            ys = self.cfg.terrain.measured_points_y
+            near_x = [i for i, v in enumerate(xs) if abs(v) <= 0.15]
+            near_y = [i for i, v in enumerate(ys) if abs(v) <= 0.20]
+            indices = [i * len(ys) + j for i in near_x for j in near_y]
+            if indices and samples.shape[1] == len(xs) * len(ys):
+                local_terrain = samples[:, indices].mean(dim=1)
+        if local_terrain is None:
+            # Fallback for plane or different terrain sampling configuration.
+            local_height = self.base_height
+        else:
+            local_height = self.root_states[:, 2] - local_terrain
+        return torch.abs(local_height - self.commands[:, 2])
+
+    def _reward_nominal_state(self):
+        """Penalize asymmetric/splayed legs, with a mild posture regularizer."""
+        diff = self.theta0[:, 0] - self.theta0[:, 1]
+        return diff.square() + 0.2 * torch.sum(self.theta0.square(), dim=1)
 
     def reset_idx(self, env_ids):
-        """
-        Override reset_idx to also update VMC state after DOF reset,
-        so the first post-reset observation contains correct VMC state.
-        """
-        from wheel_legged_gym.envs.base.legged_robot import LeggedRobot
-        LeggedRobot.reset_idx(self, env_ids)
+        # Q1 state is refreshed after the parent reset to avoid stale VMC values.
+        super().reset_idx(env_ids)
         if len(env_ids) > 0:
             self.leg_post_physics_step()

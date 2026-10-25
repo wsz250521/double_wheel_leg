@@ -37,12 +37,12 @@ class Q1VMCCfg(WheelLeggedVMCCfg):
     Q1 robot VMC configuration.
     Q1 has 6 DOFs (no abduction joints):
       [L_thigh, L_calf, L_foot(wheel), R_thigh, R_calf, R_foot(wheel)]
-    Inherits from WheelLeggedVMCCfg so the VMC controller (theta/l0 VMC, wheel PD)
-    is reused; only the asset (URDF), init_state, and action scales differ.
+    Inherits RL/training settings from WheelLeggedVMCCfg, while q1_vmc.py
+    replaces the WL kinematics and VMC joint-torque mapping.
     """
 
     class init_state(WheelLeggedVMCCfg.init_state):
-        pos = [0.0, 0.0, 0.35]  # Q1 body height
+        pos = [0.0, 0.0, 0.45]  # Q1 default resting height ~0.426 m
         default_joint_angles = {
             "L_thigh_joint": 0.4,
             "L_calf_joint": -0.9,
@@ -52,23 +52,37 @@ class Q1VMCCfg(WheelLeggedVMCCfg):
             "R_foot_joint": 0.0,
         }
 
+    class commands(WheelLeggedVMCCfg.commands):
+        class ranges(WheelLeggedVMCCfg.commands.ranges):
+            # In this repo, commands[:,2] is the *body height* reference.
+            height = [0.42, 0.42]
+
     class control(WheelLeggedVMCCfg.control):
-        # VMC action scales tuned for Q1's joint limits (theta: ±1.57, calf: -2.6..0).
-        action_scale_theta = 0.5    # theta target range: [-0.785, 0.785] rad
-        action_scale_l0 = 0.1       # l0 range: [l0_offset - 0.1, l0_offset + 0.1] m
-        action_scale_vel = 8.0      # wheel velocity ref range: [-8, 8] rad/s
-        # Keys are matched as substrings in joint names (key in joint_name).
-        # Must be substrings of the actual joint names for the matching to succeed.
-        stiffness = {"thigh": 0.0, "calf": 0.0, "foot": 0.0}   # VMC passive legs
-        damping   = {"thigh": 0.0, "calf": 0.0, "foot": 0.6}    # wheel (foot link) PD damping
+        # Q1 wheel-axle distance from trunk at default angles is ~0.35137m.
+        l0_offset = 0.3514
+        # Keep actions around physically reasonable positions near standing.
+        action_scale_theta = 0.20    # rad, axle fore/aft relative to trunk
+        action_scale_l0 = 0.04       # m; length target [0.3114, 0.3914]
+        action_scale_vel = 8.0       # rad/s
+        # Q1 model is ~6.87kg, so static load is ~33.7N per leg.
+        feedforward_force = 34.0
+        kp_theta = 35.0
+        kd_theta = 2.5
+        kp_l0 = 600.0
+        kd_l0 = 15.0
+        stiffness = {"thigh": 0.0, "calf": 0.0, "foot": 0.0}
+        damping = {"thigh": 0.0, "calf": 0.0, "foot": 0.6}
 
     class asset(WheelLeggedVMCCfg.asset):
         file = "{WHEEL_LEGGED_GYM_ROOT_DIR}/resources/robots/q1_description/urdf/q1.urdf"
         name = "Q1"
-        # Q1 kinematics: offset from trunk origin to hip joint center.
-        offset = 0.112    # sqrt(0.025^2 + 0.109^2) ≈ 0.112 m
-        l1 = 0.2          # thigh link: hip → knee ≈ 0.2 m
-        l2 = 0.2          # calf link: knee → footmotor ≈ 0.2 m
+        # Q1 trunk->hip origin per URDF: (+Y left; -Y right).  2D
+        # sagittal FK uses ONLY X and Z.  The old WL offset=0.112 was wrong.
+        hip_x = -0.025225
+        hip_z = 0.0084361
+        offset = 0.0     # unused by Q1's overridden FK
+        l1 = 0.2         # hip -> knee
+        l2 = 0.2         # knee -> wheel axle
         penalize_contacts_on = ["trunk"]
         terminate_after_contacts_on = ["trunk"]
         self_collisions = 1   # disable self-collisions
