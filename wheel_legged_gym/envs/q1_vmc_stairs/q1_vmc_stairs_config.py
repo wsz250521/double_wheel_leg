@@ -127,18 +127,35 @@ class Q1VMCStairsCfg(Q1VMCCfg):
         base_height_target = 0.42
         max_contact_force = 1000.0  # forces above this value are penalized
 
+    # class domain_rand(Q1VMCCfg.domain_rand):
+    #     randomize_friction = False
+    #     friction_range = [0.3, 1.8]
+    #     randomize_motor_torque = False
+    #     randomize_motor_torque_range = [0.85, 1.15]
+    #     randomize_Kp = False
+    #     randomize_Kp_range = [0.85, 1.15]
+    #     randomize_Kd = False
+    #     randomize_Kd_range = [0.85, 1.15]
+    #     push_robots = False
+    #     push_interval_s = 10
+    #     max_push_vel_xy = 1.0
     class domain_rand(Q1VMCCfg.domain_rand):
+        # 关闭全部域随机化
         randomize_friction = False
-        friction_range = [0.3, 1.8]
+        randomize_restitution = False
+        randomize_base_mass = False
+        randomize_inertia = False
+        randomize_base_com = False
+
+        randomize_default_dof_pos = False
+        randomize_action_delay = False
+
         randomize_motor_torque = False
-        randomize_motor_torque_range = [0.85, 1.15]
         randomize_Kp = False
-        randomize_Kp_range = [0.85, 1.15]
         randomize_Kd = False
-        randomize_Kd_range = [0.85, 1.15]
-        push_robots = False
-        push_interval_s = 10
-        max_push_vel_xy = 1.0
+
+        # 关闭随机外力扰动
+        push_robots = False   
 
 
 class Q1VMCStairsCfgPPO(Q1VMCCfgPPO):
