@@ -55,14 +55,15 @@ class Q1VMCStairsCfg(Q1VMCCfg):
 
     class terrain(Q1VMCCfg.terrain):
         # ---- curriculum ----
-        curriculum = True
+        mesh_type = "plane"
+        curriculum = False
         max_init_terrain_level = 0   # start at easiest row
         num_rows = 6                  # 6 difficulty levels
         num_cols = 20
 
         # Terrain types: [smooth, rough, stairs_up, stairs_down, discrete, stepping_stones]
         # Stairs dominate so the policy spends most capacity on the task that matters.
-        terrain_proportions = [0.5, 0.0, 0.25, 0.25, 0.0, 0.0]
+        terrain_proportions = [0.6, 0.0, 0.3, 0.1, 0.0, 0.0]
 
         # ---- 10 cm stair target ----
         # step_height = 0.05 + (step_height_max - 0.05) * difficulty
@@ -95,9 +96,9 @@ class Q1VMCStairsCfg(Q1VMCCfg):
     class rewards(Q1VMCCfg.rewards):
         """Override scales for stair climbing; inherits non-overridden entries from LeggedRobotCfg.rewards."""
         class scales(Q1VMCCfg.rewards.scales):
-            tracking_lin_vel = 3.5
+            tracking_lin_vel = 1.0
             tracking_lin_vel_enhance = 1
-            tracking_ang_vel = 2.0
+            tracking_ang_vel = 1.0
 
             # Q1 overrides _reward_base_height() with absolute height error.
             # Negative weight gives continuous penalty without exponential vanishing.
@@ -162,4 +163,4 @@ class Q1VMCStairsCfgPPO(Q1VMCCfgPPO):
     class runner(Q1VMCCfgPPO.runner):
         experiment_name = "q1_vmc_stairs"
         run_name = ""
-        max_iterations = 10000
+        max_iterations = 20000
