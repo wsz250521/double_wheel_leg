@@ -55,19 +55,21 @@ class Q1VMCStairsCfg(Q1VMCCfg):
 
     class terrain(Q1VMCCfg.terrain):
         # ---- curriculum ----
-        mesh_type = "plane"
-        curriculum = False
+        # mesh_type = "plane"
+        mesh_type = "trimesh"
+        measure_heights = True
+        curriculum = True
         max_init_terrain_level = 0   # start at easiest row
         num_rows = 6                  # 6 difficulty levels
         num_cols = 20
 
         # Terrain types: [smooth, rough, stairs_up, stairs_down, discrete, stepping_stones]
         # Stairs dominate so the policy spends most capacity on the task that matters.
-        terrain_proportions = [0.6, 0.0, 0.3, 0.1, 0.0, 0.0]
+        terrain_proportions = [0.5, 0.0, 0.25, 0.25, 0.0, 0.0]
 
         # ---- 10 cm stair target ----
         # step_height = 0.05 + (step_height_max - 0.05) * difficulty
-        step_height_max = 0.10   # 10 cm stairs at max difficulty
+        step_height_max = 0.15   # 10 cm stairs at max difficulty
 
         # ---- wider forward perception for stair detection ----
         measured_points_x = [
@@ -99,6 +101,7 @@ class Q1VMCStairsCfg(Q1VMCCfg):
             tracking_lin_vel = 1.0
             tracking_lin_vel_enhance = 1
             tracking_ang_vel = 1.0
+            stair_gait = 1.0
 
             # Q1 overrides _reward_base_height() with absolute height error.
             # Negative weight gives continuous penalty without exponential vanishing.

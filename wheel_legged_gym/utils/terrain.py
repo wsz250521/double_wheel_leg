@@ -130,7 +130,14 @@ class Terrain:
         # Falls back to the legacy 0.05 + 0.18 * difficulty when not specified.
         step_height_min = 0.05
         step_height_max = getattr(self.cfg, "step_height_max", 0.23)
-        step_height = step_height_min + (step_height_max - step_height_min) * difficulty
+        # Absolute step height override [m]. When set (not None) every stair
+        # terrain uses this fixed step height instead of the curriculum value,
+        # e.g. 0.06 for 6 cm stairs. The sign flip for down-stairs still applies.
+        step_height_override = getattr(self.cfg, "step_height", None)
+        if step_height_override is not None:
+            step_height = step_height_override
+        else:
+            step_height = step_height_min + (step_height_max - step_height_min) * difficulty
         discrete_obstacles_height = 0.05 + difficulty * 0.1
         stepping_stones_size = 1.5 * (1.05 - difficulty)
         stone_distance = 0.05 if difficulty == 0 else 0.1

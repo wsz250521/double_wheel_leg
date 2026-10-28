@@ -39,9 +39,19 @@ from wheel_legged_gym.utils import get_args, export_policy_as_jit, task_registry
 import numpy as np
 import torch
 
+# 楼梯任务运行时固定使用的台阶高度 [m]。设为 None 则按难度课程自动生成
+# (0.05 + (step_height_max - 0.05) * difficulty)。
+STAIR_STEP_HEIGHT = 0.03  # 6 cm
+
 
 def play(args):
     env_cfg, train_cfg = task_registry.get_cfgs(name=args.task)
+    env_cfg.commands.curriculum = False
+    env_cfg.commands.heading_command = False
+
+    env_cfg.commands.ranges.lin_vel_x = [0.0, 0.6]
+    env_cfg.commands.ranges.ang_vel_yaw = [0.0, 0.0]
+    env_cfg.commands.ranges.height = [0.42, 0.42]
     # override some parameters for testing
     env_cfg.env.episode_length_s = 20
     env_cfg.env.fail_to_terminal_time_s = 3
@@ -88,6 +98,8 @@ def play(args):
         ]
         # 相机从后侧方跟随机器人
         env_cfg.viewer.pos = [-3.0, -2.5, 1.5]
+        # 台阶高度固定为 STAIR_STEP_HEIGHT（不再随难度变化）
+        env_cfg.terrain.step_height = STAIR_STEP_HEIGHT
     elif is_q1:
         # Q1 terrain: smaller, no curriculum (all terrain types from the start)
         env_cfg.terrain.num_rows = 4
@@ -113,8 +125,10 @@ def play(args):
         # 20 列、terrain_proportions=[0.5,0,0,0.25,0.25,...] 时:
         #   第 0~9 列是平地，第 10~14 列是上楼梯，第 15~19 列是下楼梯。
         stairs_col = 12                       # 上楼梯
-        stairs_row = 3                        # 难度 3/6 -> 台阶高度 0.05 + 0.05*0.5 = 7.5 cm
-        env.terrain_types[:] = stairs_col
+        stairs_row = 1                        # 难度行(0~5)，台阶高度已固定为 STAIR_STEP_HEIGHT
+        # env.terrain_types[:] = stairs_col
+        if hasattr(env, "terrain_types"):
+            env.terrain_types[:] = stairs_col
         env.terrain_levels[:] = stairs_row
         env.env_origins[:] = env.terrain_origins[stairs_row, stairs_col]
         env_ids = torch.tensor([0], device=env.device, dtype=torch.long)
@@ -158,7 +172,7 @@ def play(args):
     img_idx = 0
     latent = None
 
-    CoM_offset_compensate = True
+    CoM_offset_compensate = False
     vel_err_intergral = torch.zeros(env.num_envs, device=env.device)
     vel_cmd = torch.zeros(env.num_envs, device=env.device)
 
@@ -168,9 +182,11 @@ def play(args):
         else:
             actions = policy(obs.detach())
 
-        env.commands[:, 0] = 2.5
-        env.commands[:, 2] = 0.18  # + 0.07 * np.sin(i * 0.01)
-        env.commands[:, 3] = 0
+        env.commands[:, 0] = 0.6   # 恒定前进速度 0.3 m/s
+        env.commands[:, 1] = 0.0   # 不转向
+        env.commands[:, 2] = 0.42  # 机身高度
+        env.commands[:, 3] = 0.0
+
 
         if CoM_offset_compensate:
             if i > 200 and i < 600:

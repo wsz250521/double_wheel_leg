@@ -95,6 +95,138 @@ class LeggedRobotQ1VMC(LeggedRobotVMC):
         qdot = torch.stack((hip_vel, knee_vel), dim=-1)
         self.L0_dot = torch.sum(self._q1_jac_length * qdot, dim=-1)
         self.theta0_dot = torch.sum(self._q1_jac_theta * qdot, dim=-1)
+    
+    def _reward_stair_gait(self):
+        """
+        台阶触发式抬腿步态奖励。
+
+        1. 前方存在上升台阶时才激活。
+        2. 鼓励腿部缩短或摆动，从而抬高轮子。
+        3. 鼓励左右腿产生差异化动作。
+        4. 鼓励抬腿期间保持前进和机身稳定。
+
+        返回: [num_envs]
+        """
+
+        # ---------- 1. 平地不启用 ----------
+        if self.cfg.terrain.mesh_type not in ["trimesh", "heightfield"]:
+            return torch.zeros(self.num_envs, device=self.device)
+
+        if not self.cfg.terrain.measure_heights:
+            return torch.zeros(self.num_envs, device=self.device)
+
+        # ---------- 2. 检测前方台阶 ----------
+
+        # 地形采样点在机器人局部坐标系中的 X 坐标
+        points_x = self.height_points[0, :, 0]
+
+        # 前方 0.1~0.5m 范围内的地形
+        front_mask = (points_x >= 0.1) & (points_x <= 0.5)
+
+        # 后方 -0.3~-0.1m 作为当前地面参考
+        back_mask = (points_x >= -0.3) & (points_x <= -0.1)
+
+        # 前方最高地形
+        front_height = torch.max(
+            self.measured_heights[:, front_mask],
+            dim=1
+        ).values
+
+        # 后方地形参考高度
+        back_height = torch.median(
+            self.measured_heights[:, back_mask],
+            dim=1
+        ).values
+
+        # 前后地形高度差
+        step_height = torch.clamp(
+            front_height - back_height,
+            min=0.0
+        )
+
+        # 高度差超过 2cm 开始激活
+        # 5cm 及以上时完全激活
+        step_gate = torch.clamp(
+            (step_height - 0.02) / 0.03,
+            min=0.0,
+            max=1.0
+        )
+
+        # ---------- 3. 计算腿部抬升程度 ----------
+
+        # 默认站立腿长
+        nominal_l0 = self.cfg.control.l0_offset
+
+        # 当前轮轴相对机身的竖直距离
+        # theta0 接近 0 时，腿基本竖直
+        vertical_length = self.L0 * torch.cos(self.theta0)
+
+        # 相对于默认姿态的轮轴抬升量
+        # 这是相对机身的运动学抬升量，不是实际离地高度
+        lift_height = torch.clamp(
+            nominal_l0 - vertical_length,
+            min=0.0
+        )
+
+        # 抬升 4cm 左右可获得较高奖励
+        lift_score = torch.clamp(
+            lift_height / 0.04,
+            min=0.0,
+            max=1.0
+        )
+
+        left_lift = lift_score[:, 0]
+        right_lift = lift_score[:, 1]
+
+        # ---------- 4. 步态协调奖励 ----------
+
+        # 鼓励至少有一条腿主动抬升
+        active_lift = torch.maximum(
+            left_lift,
+            right_lift
+        )
+
+        # 鼓励左右腿动作产生差异
+        gait_difference = torch.abs(
+            left_lift - right_lift
+        )
+
+        # 允许同步抬腿，但更倾向于差异化动作
+        gait_reward = (
+            0.7 * active_lift
+            + 0.3 * gait_difference
+        )
+
+        # ---------- 5. 前进奖励门控 ----------
+
+        # 鼓励抬腿时继续向前
+        forward_factor = torch.clamp(
+            self.base_lin_vel[:, 0] / 0.3,
+            min=0.0,
+            max=1.0
+        )
+
+        # 保留基础奖励，避免撞上台阶停住后奖励完全消失
+        forward_factor = 0.3 + 0.7 * forward_factor
+
+        # ---------- 6. 姿态稳定门控 ----------
+
+        upright_factor = torch.clamp(
+            (-self.projected_gravity[:, 2] - 0.6) / 0.4,
+            min=0.0,
+            max=1.0
+        )
+
+        # ---------- 7. 最终奖励 ----------
+
+        reward = (
+            step_gate
+            * gait_reward
+            * forward_factor
+            * upright_factor
+        )
+
+        return reward
 
     def VMC(self, F, T):
         """Map Q1 virtual axial-force and angle-torque into URDF joint torques.

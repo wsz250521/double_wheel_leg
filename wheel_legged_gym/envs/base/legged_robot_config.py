@@ -84,6 +84,10 @@ class LeggedRobotCfg(BaseConfig):
         # Maximum stair step height [m] at difficulty=1. Set lower to cap the
         # tallest stair the curriculum will ever produce (e.g. 0.10 for 10cm stairs).
         step_height_max = 0.23
+        # Absolute stair step height [m]. When set to a number, every stair terrain
+        # uses this fixed step height (ignores the difficulty curriculum), e.g.
+        # 0.06 for 6 cm stairs. None = derive it from step_height_max.
+        step_height = None
         # trimesh only:
         slope_treshold = (
             0.75  # slopes above this threshold will be corrected to vertical surfaces
